@@ -1,23 +1,15 @@
-"""The core functionality"""
+"""Tool-level APIs for graph construction, training and post-analysis."""
 
-from ._general import (
-    discretize,
-)
+from ._pbg import gen_graph, pbg_train
+from ._post_training import compare_entities, embed, query, softmax
 from ._umap import umap
-from ._gene_scores import gene_scores
-from ._integration import (
-    infer_edges,
-    trim_edges
-)
-from ._pbg import (
-    gen_graph,
-    pbg_train
-)
-from ._post_training import (
-    softmax,
-    embed,
-    compare_entities,
-    query,
-    find_master_regulators,
-    find_target_genes,
-)
+
+__all__ = [
+    "gen_graph",
+    "pbg_train",
+    "softmax",
+    "embed",
+    "compare_entities",
+    "query",
+    "umap",
+]

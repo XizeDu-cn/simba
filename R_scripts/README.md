@@ -14,3 +14,5 @@ e.g.,
 ```sh
 $ Rscript scan_for_kmers_motifs.R -i peaks.bed -g hg19.fa -s 'Homo sapiens'
 ```
+
+`bedtools` must be installed and available in `PATH`.

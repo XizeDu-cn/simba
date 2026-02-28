@@ -29,9 +29,10 @@ setup(
     ],
     python_requires='>=3.7',
     install_requires=[
-        x.strip() for x in
-        Path('requirements.txt').read_text('utf-8').splitlines()
+        line.strip()
+        for line in Path('requirements.txt').read_text('utf-8').splitlines()
+        if line.strip() and not line.strip().startswith('#')
     ],
     include_package_data=True,
-    package_data={"simba": ["data/gene_anno/*.bed"]}
+    package_data={}
 )

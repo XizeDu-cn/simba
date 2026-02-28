@@ -1,54 +1,90 @@
-[![documentation](https://readthedocs.org/projects/simba-bio/badge/?version=latest)](https://simba-bio.readthedocs.io/en/latest/)
-[![CI](https://github.com/pinellolab/simba/actions/workflows/CI.yml/badge.svg)](https://github.com/pinellolab/simba/actions/workflows/CI.yml)
-[![Install with conda](https://anaconda.org/bioconda/simba/badges/version.svg)](https://anaconda.org/bioconda/simba)
-[![codecov](https://codecov.io/gh/pinellolab/simba/branch/master/graph/badge.svg?token=NDQJQPL18K)](https://codecov.io/gh/pinellolab/simba)
+# SIMBA (Minimal scATAC Project)
 
-# SIMBA
+This repository is trimmed to one purpose:
 
-SIMBA: **SI**ngle-cell e**MB**edding **A**long with features
+- process **one scATAC AnnData** (`.h5ad`)
+- run the SIMBA scATAC tutorial workflow end-to-end
+- keep **kmer/motif** branch and downstream analysis
 
-Main website, documentation and tutorials: https://simba-bio.readthedocs.io
+The retained workflow matches the tutorial chain:
 
-Preprint: Huidong Chen, Jayoung Ryu, Michael E. Vinyard, Adam Lerer & Luca Pinello. ["SIMBA: SIngle-cell eMBedding Along with features. *bioRxiv, 2021.10.17.464750v1* (2021)."](https://www.biorxiv.org/content/10.1101/2021.10.17.464750v1)  
-  
-The scripts used for the comparison analyses in the manuscript can be found [here](https://github.com/pinellolab/simba_comparison).
-
-<img src="./docs/source/_static/img/logo_simba.png?raw=true" width="450">
+1. `filter_peaks` / `filter_cells_atac` / `cal_qc_atac`
+2. `pca` + `select_pcs` + `select_pcs_features`
+3. `write_bed` and kmer/motif scanning (`R_scripts/scan_for_kmers_motifs.R`)
+4. `gen_graph` + `pbg_train`
+5. `read_embedding`
+6. `umap` / `embed` / `compare_entities` / `query`
+7. save all key AnnData outputs
 
 ## Installation
-Before installing SIMBA make sure to have the correct channels priority by executing these commands:
-```
-conda config --add channels defaults
-conda config --add channels bioconda
-conda config --add channels conda-forge
-conda config --set channel_priority strict
+
+```bash
+pip install -e .
 ```
 
-To install the simba package with conda, run:
-```
-conda create -n env_simba jupyter simba
-```
+## kmer/motif prerequisites
 
-To enable the k-mer and TF analyses please install these additional dependencies(optional):
-```
+Install required R packages (example via conda):
+
+```bash
 conda install r-essentials r-optparse bioconductor-jaspar2020 bioconductor-biostrings bioconductor-tfbstools bioconductor-motifmatchr bioconductor-summarizedexperiment r-doparallel bioconductor-rhdf5 bioconductor-hdf5array
 ```
 
-## [SIMBA v1.2 (dev)](https://github.com/pinellolab/simba/tree/dev) update
-We have added the support for
-* Continuous edge weight encoding for scRNA-seq ([tutorial](https://github.com/pinellolab/simba_tutorials/blob/main/v1.2/rna_10xpmbc_edgeweigts.ipynb))
-* Significance testing of features' cell type specificity metrics ([tutorial](https://github.com/pinellolab/simba_tutorials/tree/main/v1.1sig))
+`scan_for_kmers_motifs.R` also needs `bedtools` available in PATH.
 
-### SIMBA v1.2 Installation
-To install the latest development version of simba:
-```
-conda create -n env_simba_dev jupyter pytorch pybedtools -y
-pip install 'simba @ git+https://github.com/pinellolab/simba@dev'
-```
-To enable the k-mer and TF analyses please install these additional dependencies(optional):
-```
-conda install r-essentials r-optparse bioconductor-jaspar2020 bioconductor-biostrings bioconductor-tfbstools bioconductor-motifmatchr bioconductor-summarizedexperiment r-doparallel bioconductor-rhdf5 bioconductor-hdf5array
+## Run pipeline
+
+### Option A: use your own scATAC h5ad + precomputed kmer/motif h5
+
+```bash
+python scripts/run_scatac_tutorial_pipeline.py \
+  --input-h5ad /path/to/your_scatac.h5ad \
+  --kmer-h5 /path/to/freq_kmer.h5 \
+  --motif-h5 /path/to/freq_motif.h5 \
+  --workdir result_simba_atacseq
 ```
 
-Please refer to the main documentation website to learn how to use SIMBA with the provided tutorials:  https://simba-bio.readthedocs.io
+### Option B: run R scan inside the pipeline
 
+```bash
+python scripts/run_scatac_tutorial_pipeline.py \
+  --input-h5ad /path/to/your_scatac.h5ad \
+  --run-scan \
+  --genome-fasta /path/to/hg19.fa \
+  --species "Homo sapiens" \
+  --workdir result_simba_atacseq
+```
+
+### Option C: run tutorial example dataset
+
+```bash
+python scripts/run_scatac_tutorial_pipeline.py \
+  --use-example-data \
+  --run-scan \
+  --genome-fasta /path/to/hg19.fa \
+  --species "Homo sapiens" \
+  --workdir result_simba_atacseq
+```
+
+## Main outputs
+
+- `adata_CP.h5ad`, `adata_PK.h5ad`, `adata_PM.h5ad`
+- `adata_C.h5ad`, `adata_P.h5ad`, `adata_K.h5ad`, `adata_M.h5ad`, `adata_all.h5ad`
+- `adata_cmp_CM.h5ad`, `adata_cmp_CK.h5ad`
+- figures under `<workdir>/figures`
+- `run_manifest.json` (runtime config + stage timings)
+
+## Project layout
+
+The pipeline logic now lives inside `simba` itself:
+
+- `simba/pipeline.py`: end-to-end scATAC pipeline (prep/train/analyze/save)
+- `simba/tools/_pbg.py`: graph table construction + PBG training
+- `simba/preprocessing/*`: ATAC preprocessing (QC/PCA/select top features)
+- `simba/plotting/*`: compact plotting utilities for QC and post-analysis
+- `scripts/run_scatac_tutorial_pipeline.py`: thin executable wrapper
+
+## Repository scope
+
+Removed content includes docs, CI, tests, RNA/integration/gene-score modules, and unrelated datasets.
+Only scATAC + kmer/motif tutorial functionality is kept.

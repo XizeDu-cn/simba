@@ -1,227 +1,125 @@
-"""reading and writing"""
+"""Read/write utilities for the minimal SIMBA workflow.
 
-import os
-import pandas as pd
+中文说明：
+负责训练结果读取（embedding/config/stats）与 BED 导出。
+重点是 alias 与原始实体 ID 的双向映射，保证结果可解释。
+"""
+
 import json
-from anndata import (
-    AnnData,
-    read_h5ad,
-    read_csv,
-    read_excel,
-    read_hdf,
-    read_loom,
-    read_mtx,
-    read_text,
-    read_umi_tools,
-    read_zarr,
-)
+import os
 from pathlib import Path
-import tables
+
+import pandas as pd
+from anndata import read_h5ad, read_hdf
 
 from ._settings import settings
-from ._utils import _read_legacy_10x_h5, _read_v3_10x_h5
 
 
-def read_embedding(path_emb=None,
-                   path_entity=None,
-                   convert_alias=True,
-                   path_entity_alias=None,
-                   prefix=None,
-                   num_epochs=None):
-    """Read in entity embeddings from pbg training
+def read_embedding(
+    path_emb=None,
+    path_entity=None,
+    convert_alias=True,
+    path_entity_alias=None,
+    prefix=None,
+    num_epochs=None,
+):
+    """Read entity embeddings produced by PBG training.
 
-    Parameters
-    ----------
-    path_emb: `str`, optional (default: None)
-        Path to directory for pbg embedding model
-        If None, .settings.pbg_params['checkpoint_path'] will be used.
-    path_entity: `str`, optional (default: None)
-        Path to entity name file
-    prefix: `list`, optional (default: None)
-        A list of entity type prefixes to include.
-        By default, it reads in the embeddings of all entities.
-    convert_alias: `bool`, optional (default: True)
-        If True, it will convert entity aliases to the original indices
-    path_entity: `str`, optional (default: None)
-        Path to entity alias file
-    num_epochs: `int`, optional (default: None)
-        The embedding result associated with num_epochs to read in
-
-    Returns
-    -------
-    dict_adata: `dict`
-        A dictionary of anndata objects of shape
-        (#entities x #dimensions)
+    中文说明：
+    PBG 的 embedding 文件使用 alias（如 C.0）存储实体顺序。
+    当 convert_alias=True 时，通过 entity_alias.txt 反查回原始实体 ID。
     """
     pbg_params = settings.pbg_params
-    if path_emb is None:
-        path_emb = pbg_params['checkpoint_path']
-    if path_entity is None:
-        path_entity = pbg_params['entity_path']
-    if num_epochs is None:
-        num_epochs = pbg_params["num_epochs"]
-    if prefix is None:
-        prefix = []
-    assert isinstance(prefix, list), \
-        "`prefix` must be list"
+    path_emb = path_emb or pbg_params["checkpoint_path"]
+    path_entity = path_entity or pbg_params["entity_path"]
+    num_epochs = num_epochs or pbg_params["num_epochs"]
+    prefix = prefix or []
+
+    if not isinstance(prefix, list):
+        raise TypeError("`prefix` must be list")
+
+    alias_table = None
     if convert_alias:
-        if path_entity_alias is None:
-            path_entity_alias = Path(path_emb).parent.as_posix()
-        df_entity_alias = pd.read_csv(
-            os.path.join(path_entity_alias, 'entity_alias.txt'),
+        # alias_table 结构：index=alias，列 id=原始实体名。
+        alias_root = path_entity_alias or Path(path_emb).parent.as_posix()
+        alias_table = pd.read_csv(
+            os.path.join(alias_root, "entity_alias.txt"),
             header=0,
             index_col=0,
-            sep='\t')
-        df_entity_alias['id'] = df_entity_alias.index
-        df_entity_alias.index = df_entity_alias['alias'].values
+            sep="\t",
+        )
+        alias_table["id"] = alias_table.index
+        alias_table.index = alias_table["alias"].values
 
-    dict_adata = dict()
-    for x in os.listdir(path_emb):
-        if x.startswith('embeddings'):
-            entity_type = x.split('_')[1]
-            if (len(prefix) == 0) or (entity_type in prefix):
-                adata = \
-                    read_hdf(os.path.join(path_emb,
-                                          f'embeddings_{entity_type}_0.'
-                                          f'v{num_epochs}.h5'),
-                             key="embeddings")
-                with open(
-                    os.path.join(path_entity,
-                                 f'entity_names_{entity_type}_0.json'), "rt")\
-                        as tf:
-                    names_entity = json.load(tf)
-                if convert_alias:
-                    names_entity = \
-                        df_entity_alias.loc[names_entity, 'id'].tolist()
-                adata.obs.index = names_entity
-                dict_adata[entity_type] = adata
+    dict_adata = {}
+    for filename in os.listdir(path_emb):
+        if not filename.startswith("embeddings"):
+            continue
+
+        entity_type = filename.split("_")[1]
+        if prefix and entity_type not in prefix:
+            continue
+
+        adata = read_hdf(
+            os.path.join(path_emb, f"embeddings_{entity_type}_0.v{num_epochs}.h5"),
+            key="embeddings",
+        )
+        with open(os.path.join(path_entity, f"entity_names_{entity_type}_0.json"), "rt") as fp:
+            names_entity = json.load(fp)
+
+        if convert_alias:
+            names_entity = alias_table.loc[names_entity, "id"].tolist()
+
+        adata.obs.index = names_entity
+        dict_adata[entity_type] = adata
+
     return dict_adata
 
 
-# modifed from
-# scanpy https://github.com/theislab/scanpy/blob/master/scanpy/readwrite.py
-def read_10x_h5(filename,
-                genome=None,
-                gex_only=True):
-    """Read 10x-Genomics-formatted hdf5 file.
-
-    Parameters
-    ----------
-    filename
-        Path to a 10x hdf5 file.
-    genome
-        Filter expression to genes within this genome. For legacy 10x h5
-        files, this must be provided if the data contains more than one genome.
-    gex_only
-        Only keep 'Gene Expression' data and ignore other feature types,
-        e.g. 'Antibody Capture', 'CRISPR Guide Capture', or 'Custom'
-
-    Returns
-    -------
-    adata: AnnData
-        Annotated data matrix, where observations/cells are named by their
-        barcode and variables/genes by gene name
-    """
-    with tables.open_file(str(filename), 'r') as f:
-        v3 = '/matrix' in f
-    if v3:
-        adata = _read_v3_10x_h5(filename)
-        if genome:
-            if genome not in adata.var['genome'].values:
-                raise ValueError(
-                    f"Could not find data corresponding to "
-                    f"genome '{genome}' in '{filename}'. "
-                    f'Available genomes are:'
-                    f' {list(adata.var["genome"].unique())}.'
-                )
-            adata = adata[:, adata.var['genome'] == genome]
-        if gex_only:
-            adata = adata[:, adata.var['feature_types'] == 'Gene Expression']
-        if adata.is_view:
-            adata = adata.copy()
-    else:
-        adata = _read_legacy_10x_h5(filename, genome=genome)
-    return adata
-
-
 def load_pbg_config(path=None):
-    """Load PBG configuration into global setting
+    """Load PBG config into global settings.
 
-    Parameters
-    ----------
-    path: `str`, optional (default: None)
-        Path to the directory for pbg configuration file
-        If None, `.settings.pbg_params['checkpoint_path']` will be used
-
-    Returns
-    -------
-    Updates `.settings.pbg_params`
-
+    中文说明：
+    读取训练后 model/config.json，覆盖 settings.pbg_params，
+    便于后续 read_embedding/query 使用一致上下文。
     """
-    if path is None:
-        path = settings.pbg_params['checkpoint_path']
+    path = path or settings.pbg_params["checkpoint_path"]
     path = os.path.normpath(path)
-    with open(os.path.join(path, 'config.json'), "rt") as tf:
-        pbg_params = json.load(tf)
+    with open(os.path.join(path, "config.json"), "rt") as fp:
+        pbg_params = json.load(fp)
     settings.set_pbg_params(config=pbg_params)
 
 
 def load_graph_stats(path=None):
-    """Load graph statistics into global setting
-
-    Parameters
-    ----------
-    path: `str`, optional (default: None)
-        Path to the directory for graph statistics file
-        If None, `.settings.pbg_params['checkpoint_path']` will be used
-
-    Returns
-    -------
-    Updates `.settings.graph_stats`
-    """
+    """Load graph statistics into global settings."""
     if path is None:
-        path = \
-            Path(settings.pbg_params['entity_path']).parent.parent.as_posix()
+        path = Path(settings.pbg_params["entity_path"]).parent.parent.as_posix()
     path = os.path.normpath(path)
-    with open(os.path.join(path, 'graph_stats.json'), "rt") as tf:
-        dict_graph_stats = json.load(tf)
-    dirname = os.path.basename(path)
-    settings.graph_stats[dirname] = dict_graph_stats.copy()
+    with open(os.path.join(path, "graph_stats.json"), "rt") as fp:
+        graph_stats = json.load(fp)
+    settings.graph_stats[os.path.basename(path)] = graph_stats
 
 
-def write_bed(adata,
-              use_top_pcs=True,
-              filename=None
-              ):
-    """Write peaks into .bed file
+def write_bed(adata, use_top_pcs=True, filename=None):
+    """Write peaks as BED records (`chr`, `start`, `end`).
 
-    Parameters
-    ----------
-    adata: AnnData
-        Annotated data matrix with peaks as variables.
-    use_top_pcs: `bool`, optional (default: True)
-        Use top-PCs-associated features
-    filename: `str`, optional (default: None)
-        Filename name for peaks.
-        By default, a file named 'peaks.bed' will be written to
-        `.settings.workdir`
+    中文说明：
+    默认只输出 top_pcs 对应 peak，和教程保持一致；
+    若 use_top_pcs=False，则导出全部 peak。
     """
-    if filename is None:
-        filename = os.path.join(settings.workdir, 'peaks.bed')
-    for x in ['chr', 'start', 'end']:
-        if x not in adata.var_keys():
-            raise ValueError(f"could not find {x} in `adata.var_keys()`")
+    filename = filename or os.path.join(settings.workdir, "peaks.bed")
+
+    for key in ["chr", "start", "end"]:
+        if key not in adata.var:
+            raise ValueError(f"could not find {key} in `adata.var_keys()`")
+
     if use_top_pcs:
-        assert 'top_pcs' in adata.var_keys(), \
-            "please run `si.pp.select_pcs_features()` first"
-        peaks_selected = adata.var[
-            adata.var['top_pcs']][['chr', 'start', 'end']]
+        if "top_pcs" not in adata.var:
+            raise ValueError("please run `si.pp.select_pcs_features()` first")
+        peaks = adata.var.loc[adata.var["top_pcs"], ["chr", "start", "end"]]
     else:
-        peaks_selected = adata.var[
-            ['chr', 'start', 'end']]
-    peaks_selected.to_csv(filename,
-                          sep='\t',
-                          header=False,
-                          index=False)
-    fp, fn = os.path.split(filename)
-    print(f'"{fn}" was written to "{fp}".')
+        peaks = adata.var[["chr", "start", "end"]]
+
+    peaks.to_csv(filename, sep="\t", header=False, index=False)
+    out_dir, out_file = os.path.split(filename)
+    print(f'"{out_file}" was written to "{out_dir}".')
