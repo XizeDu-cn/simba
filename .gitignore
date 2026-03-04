@@ -155,3 +155,6 @@ $RECYCLE.BIN/
 docs/source/_autosummary/
 
 # End of https://www.gitignore.io/api/osx,python,windows
+
+# Result output directories
+result_*/

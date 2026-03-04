@@ -24,7 +24,7 @@ def get_colors(arr,
     """
 
     if not isinstance(arr, (pd.Series, np.ndarray)):
-        raise TypeError("`arr` must be pd.Series or np.ndarray")
+        arr = np.asarray(arr)
     colors = []
     if is_numeric_dtype(arr):
         image_cmap = mpl.rcParams['image.cmap']
@@ -70,7 +70,7 @@ def generate_palette(arr):
     """
 
     if not isinstance(arr, (pd.Series, np.ndarray)):
-        raise TypeError("`arr` must be pd.Series or np.ndarray")
+        arr = np.asarray(arr)
     colors = []
     if is_string_dtype(arr) or is_categorical_dtype(arr):
         categories = np.unique(arr)
